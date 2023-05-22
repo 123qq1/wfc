@@ -214,8 +214,8 @@ impl Cell{
 
         if squares_filter.len() == old_states.len() {return false;}
         println!("x:{} y{}",self.x,self.y);
-        println!("old: l:{} {:?}",old_states.len(),old_states.iter().map(|(i,_)|i).collect::<Vec<&usize>>());
-        println!("other: l_s:{} l_f:{}",squares.len(),squares_filter.len());
+        //println!("old: l:{} {:?}",old_states.len(),old_states.iter().map(|(i,_)|i).collect::<Vec<&usize>>());
+        //println!("other: l_s:{} l_f:{}",squares.len(),squares_filter.len());
 
         //println!("s:{} s_f:{} s_t:{}",squares.len(),squares_filter.len(),states.len());
         println!("i: {} : {:?}",i,states);
@@ -223,16 +223,30 @@ impl Cell{
 
         let indexes : Vec<(usize,&(usize,[Rgba<u8>;9]))> = old_states.iter().enumerate().collect();
         let removed : Vec<(&usize,&usize)> = indexes.iter().filter(|(i,_)|!squares_filter.contains(&i)).map(|(i,(r,_))|(i,r)).collect();
-        println!("remove:{:?}",removed);
-        println!("keep:{:?}",squares_filter);
+
+        for j in 0..196 {
+            if j % 14 == 0
+            {
+                println!("");
+                print!("# ");
+            }
+            let r_i : Vec<&(&usize,&usize)> = removed.iter().filter(|(_,&k)|j == k).collect();
+            let s_i : Vec<&&usize> = squares_filter.iter().filter(|&&&k| j == k).collect();
+            if r_i.len() > 0 {print!("x")}
+            else if s_i.len() > 0{print!("o")}
+            else { print!(".") }
+        }
+        println!("");
+        //println!("keep:{:?}",squares_filter);
         if squares_filter.len() == 0 {
             panic!("Will remove all states!\n
+            x: {} y:{}\n
             squares:{:?}\n
             states:{:?}\n
             filter:{:?}\n
             off set x:{} y:{}\n
             removed:{:?}
-            ",squares,states,squares_filter,x_off,y_off,removed);}
+            ",self.x,self.y,squares,states,squares_filter,x_off,y_off,removed);}
         //println!("o:{}",self.super_states.len());
 
         //self.super_states = self.super_states.iter().enumerate().filter(|(i,_)| squares_filter.contains(&i)).map(|(_,&s_s)| s_s).collect();
