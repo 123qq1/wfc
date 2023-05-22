@@ -1,6 +1,5 @@
-extern crate core;
-
 use std::cmp::min;
+use std::collections::HashSet;
 use image::{DynamicImage, GenericImageView, Rgba, GenericImage};
 use image::io::Reader as ImageReader;
 use rand::Rng;
@@ -111,8 +110,38 @@ fn main() {
         let min_x = min_index%width;
         let min_y = min_index/width;
 
-        out[min_y][min_x].collapse();
-        updates.push((min_y,min_x));
+        let c_state = out[min_y][min_x].collapse();
+        //updates.push((min_y,min_x));
+        let y_1 = min_y.checked_sub(1).unwrap_or(0);
+
+        let y_2 = min_y as usize + 2;
+        let y_2 = min(y_2,height);
+
+        for v_y in &mut out[y_1..y_2] {
+            let x_1 = min_x.checked_sub(1).unwrap_or(0);
+
+            let x_2 = x_1 as usize + 2;
+            let x_2 = min(x_2,width);
+
+            for c in &mut v_y[x_1..x_2] {
+                let x_off = min_x as i32 - c.x as i32;
+                let y_off = min_y as i32 - c.y as i32;
+
+                if x_off == 0 && y_off == 0 {continue;}
+
+                c.determin(c_state[(x_off + (y_off*3)+4)as usize]);
+                updates.push((c.x as usize,c.y as usize));
+
+                //println!("x:{:02} y:{:02}",x_off,y_off);
+
+                let _n_s = (y_2 - y_1) * (x_2 - x_1);
+                //println!("{}",n_s);
+                //println!("{} {}",c.y,c.x);
+
+            }
+        }
+
+
 
         while updates.len() > 0 {
             let _pre_len = updates.len();
@@ -156,9 +185,21 @@ fn main() {
             }
             //println!("After: {}",updates.len());
         }
-        max_entropy = *entropys.iter().filter(|&&e| e < usize::MAX).max().unwrap();
+        max_entropy = *entropys.iter().filter(|&&e| e < usize::MAX).max().unwrap_or(&0);
     }
-    println!("done?")
+    println!("done?");
+
+    let mut d_image = DynamicImage::new_rgba8(width as u32,height as u32);
+
+    for w in 0..width {
+        for h in 0..height {
+
+            d_image.put_pixel(w as u32,h as u32,out[h][w].state());
+
+        }
+    }
+    let p = "./img/out.png";
+    d_image.save(p).unwrap();
 }
 #[derive(Clone,Debug)]
 struct Cell{
@@ -174,18 +215,36 @@ impl Cell{
     }
 
     fn collapse_coef(&self) -> usize{
-        let s = self.super_states.len();
+        let s : HashSet<Rgba<u8>> = self.super_states.iter().map(|&(_,s)|s[4].clone()).collect();
+
+
 
         if self.collapsed {
             return usize::MAX;
         }
 
-        s
+        s.len()
     }
 
-    fn collapse(&mut self){
+    fn determin(&mut self, state: Rgba<u8>){
+
+        println!("{:?}",self.super_states);
+
+        self.super_states = self.super_states.iter().filter(|&(_,s)|s[4] == state).map(|&s|s).collect();
+
+        if self.super_states.len() == 0 {panic!("Determin made 0 states")}
+
+        self.collapsed = true;
+
+    }
+
+    fn state(&self) -> Rgba<u8>{
+        self.super_states[0].1[4]
+    }
+
+    fn collapse(&mut self) -> [Rgba<u8>;9]{
         //println!("c_l:{}",self.super_states.len());
-        if self.super_states.len() == 1 {return;}
+        if self.super_states.len() == 1 {return self.super_states[0].1;}
 
         let mut r = rand::thread_rng();
         for _ in 0..(self.super_states.len()-1) {
@@ -194,16 +253,25 @@ impl Cell{
         }
 
         self.collapsed = true;
+
+        self.super_states[0].1
         //println!("c_l_n:{}",self.super_states.len());
     }
 
-    fn possible_states(&self) -> Vec<Rgba<u8>>{
-        self.super_states.iter().map(|&(_,s)|s[4].clone()).collect()
+    fn possible_states(&self) -> Vec<[Rgba<u8>;9]>{
+        self.super_states.iter().map(|&(_,s)|s.clone()).collect()
     }
 
-    fn propograte(&mut self,x_off:i32,y_off:i32,states: Vec<Rgba<u8>>) -> bool{
+    fn propograte(&mut self,x_off:i32,y_off:i32,super_states: Vec<[Rgba<u8>;9]>) -> bool{
+
+        if self.super_states.len() == 0 {panic!("No States??");}
+
+        let states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[4].clone()).collect();
+
         if self.collapsed {return false;}
         let i = x_off + (y_off * 3) + 4;
+
+        //let self_states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[i as usize].clone()).collect();
 
         //println!("i:{} x:{} y:{}",i,x_off,y_off);
 
@@ -211,19 +279,29 @@ impl Cell{
         let squares : Vec<(usize,(usize,Rgba<u8>))> = self.super_states.iter().enumerate().map(|(j,&(k,s))| (j,(k,s[i as usize]))).collect();
         let squares_filter : Vec<&usize> = squares.iter().filter(|&&(_,(_,s))| states.contains(&s)).map(|(i,_)| i).collect();
 
+        /*
+        let self_square : Vec<(usize,(usize,Rgba<u8>))> = self.super_states.iter().enumerate().map(|(j,&(k,s))| (j,(k,s[4]))).collect();
+        let mut self_filter : Vec<&usize> = squares.iter().filter(|&&(_,(_,s))| self_states.contains(&s)).map(|(i,_)| i).collect();
 
+        self_filter.extend(squares_filter);
+
+        let squares_filter : HashSet<&usize> = self_filter.iter().map(|&u|u).clone().collect();
+
+         */
         if squares_filter.len() == old_states.len() {return false;}
-        println!("x:{} y{}",self.x,self.y);
+        //println!("x:{} y{}",self.x,self.y);
         //println!("old: l:{} {:?}",old_states.len(),old_states.iter().map(|(i,_)|i).collect::<Vec<&usize>>());
         //println!("other: l_s:{} l_f:{}",squares.len(),squares_filter.len());
 
         //println!("s:{} s_f:{} s_t:{}",squares.len(),squares_filter.len(),states.len());
-        println!("i: {} : {:?}",i,states);
+        //println!("i: {} : {:?}",i,states);
         //println!("squares:{:?}\nstates:{:?}\noff:{},{}\nfilter:{:?}",self.super_states,states,x_off,y_off,squares_filter);
 
         let indexes : Vec<(usize,&(usize,[Rgba<u8>;9]))> = old_states.iter().enumerate().collect();
         let removed : Vec<(&usize,&usize)> = indexes.iter().filter(|(i,_)|!squares_filter.contains(&i)).map(|(i,(r,_))|(i,r)).collect();
+        //let keep : Vec<(&usize,&usize)> = indexes.iter().filter(|(i,_)|squares_filter.contains(&i)).map(|(i,(r,_))|(i,r)).collect();
 
+/*
         for j in 0..196 {
             if j % 14 == 0
             {
@@ -231,12 +309,14 @@ impl Cell{
                 print!("# ");
             }
             let r_i : Vec<&(&usize,&usize)> = removed.iter().filter(|(_,&k)|j == k).collect();
-            let s_i : Vec<&&usize> = squares_filter.iter().filter(|&&&k| j == k).collect();
+            let s_i : Vec<&(&usize,&usize)> = keep.iter().filter(|(_,&k)| j == k).collect();
             if r_i.len() > 0 {print!("x")}
             else if s_i.len() > 0{print!("o")}
             else { print!(".") }
         }
         println!("");
+
+        */
         //println!("keep:{:?}",squares_filter);
         if squares_filter.len() == 0 {
             panic!("Will remove all states!\n
@@ -254,8 +334,6 @@ impl Cell{
         for (r,_) in removed.iter().rev() {
             self.super_states.swap_remove(**r);
         }
-
-        if self.super_states.len() == 0 {panic!("No States??");}
 
         //println!("n:{}",self.super_states.len());
         //println!("c:{}",changed);
