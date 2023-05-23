@@ -26,7 +26,7 @@ fn main() {
             img.get_pixel(x-1,y+1),img.get_pixel(x,y+1),img.get_pixel(x+1,y+1)
         ];
 
-        library.push((l_i,state));
+        library.push(State{state,neighbours:Vec::new(),index:l_i});
         l_i += 1;
     }
 
@@ -201,16 +201,24 @@ fn main() {
     let p = "./img/out.png";
     d_image.save(p).unwrap();
 }
+
+#[derive(Clone,Debug)]
+struct State{
+    index : usize,
+    neighbours: Vec<Vec<[Rgba<u8>;9]>>,
+    state: [Rgba<u8>;9]
+}
+
 #[derive(Clone,Debug)]
 struct Cell{
-    super_states: Vec<(usize,[Rgba<u8>;9])>,
+    super_states: Vec<State>,
     x: u32,
     y: u32,
     collapsed: bool,
 }
 
 impl Cell{
-    fn new(lib : Vec<(usize,[Rgba<u8>;9])>,x : u32,y: u32) -> Cell{
+    fn new(lib : Vec<State>,x : u32,y: u32) -> Cell{
         Cell{super_states: lib,x,y,collapsed:false}
     }
 
