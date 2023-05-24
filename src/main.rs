@@ -1,5 +1,5 @@
 use std::cmp::min;
-use std::collections::HashSet;
+use std::iter::zip;
 use image::{DynamicImage, GenericImageView, Rgba, GenericImage};
 use image::io::Reader as ImageReader;
 use rand::Rng;
@@ -26,31 +26,34 @@ fn main() {
             img.get_pixel(x-1,y+1),img.get_pixel(x,y+1),img.get_pixel(x+1,y+1)
         ];
 
-        library.push(State{state,neighbours:Vec::new(),index:l_i});
+        library.push(State{state,neighbours:Default::default(),index:l_i});
         l_i += 1;
     }
 
-    //save library as images
+    let lib_c = library.clone();
 
-    for (i,state) in library.iter().enumerate() {
-        let mut d_image = DynamicImage::new_rgba8(3,3);
-
-        d_image.put_pixel(0,0,state.1[0]);
-        d_image.put_pixel(1,0,state.1[1]);
-        d_image.put_pixel(2,0,state.1[2]);
-
-        d_image.put_pixel(0,1,state.1[3]);
-        d_image.put_pixel(1,1,state.1[4]);
-        d_image.put_pixel(2,1,state.1[5]);
-
-        d_image.put_pixel(0,2,state.1[6]);
-        d_image.put_pixel(1,2,state.1[7]);
-        d_image.put_pixel(2,2,state.1[8]);
-
-        let p = format!("./img/lib/{}.png",i);
-        d_image.save(p).unwrap();
+    //fill out the library with neighbours
+    for state in &mut library {
+        for neighbour in &lib_c {
+            for i in 0..9 {
+                if i == 4 {continue;}
+                state.neighbour_check(neighbour.clone(),i);
+            }
+        }
     }
 
+    /*
+
+    println!("");
+    for state in &library {
+        print!("state {:03} :",state.index);
+        for neighbour in &state.neighbours {
+            print!("{:03} ",neighbour.len());
+        }
+        println!("");
+    }
+
+     */
     let height = 50;
     let width = 50;
     let size = (height * width) as usize;
@@ -59,7 +62,7 @@ fn main() {
 
     for x in 0..width as u32 {
         for y in 0..height as u32 {
-            out[y as usize].push(Cell::new(library.clone(),x,y));
+            out[y as usize].push(Cell::new(library.clone(),x,y,size));
         }
     }
 
@@ -105,53 +108,22 @@ fn main() {
         //println!("e_l:{} e:{:?}",entropys.len(),entropys);
         let (min_index,_min_value) = entropys.iter().enumerate().min_by_key(|(_,&t)|t).unwrap();
 
-        println!("e_i:{}",min_index);
-
         let min_x = min_index%width;
         let min_y = min_index/width;
 
-        let c_state = out[min_y][min_x].collapse();
-        //updates.push((min_y,min_x));
-        let y_1 = min_y.checked_sub(1).unwrap_or(0);
+        println!("e_i:{}",min_index);
 
-        let y_2 = min_y as usize + 2;
-        let y_2 = min(y_2,height);
-
-        for v_y in &mut out[y_1..y_2] {
-            let x_1 = min_x.checked_sub(1).unwrap_or(0);
-
-            let x_2 = x_1 as usize + 2;
-            let x_2 = min(x_2,width);
-
-            for c in &mut v_y[x_1..x_2] {
-                let x_off = min_x as i32 - c.x as i32;
-                let y_off = min_y as i32 - c.y as i32;
-
-                if x_off == 0 && y_off == 0 {continue;}
-
-                c.determin(c_state[(x_off + (y_off*3)+4)as usize]);
-                updates.push((c.x as usize,c.y as usize));
-
-                //println!("x:{:02} y:{:02}",x_off,y_off);
-
-                let _n_s = (y_2 - y_1) * (x_2 - x_1);
-                //println!("{}",n_s);
-                //println!("{} {}",c.y,c.x);
-
-            }
-        }
-
-
+        out[min_y][min_x].collapse();
+        updates.push((min_y,min_x));
 
         while updates.len() > 0 {
             let _pre_len = updates.len();
 
             let (u_y, u_x) = updates.pop().unwrap();
-            let u_c = &out[u_y][u_x];
-            let states = u_c.possible_states();
 
             //println!("working on: {} {} of {}",u_x,u_y,pre_len);
 
+            let u_c = out[u_y][u_x].clone();
 
             let y_1 = u_y.checked_sub(1).unwrap_or(0);
 
@@ -165,18 +137,27 @@ fn main() {
                 let x_2 = min(x_2,width);
 
                 for c in &mut v_y[x_1..x_2] {
-                    let x_off = u_x as i32 - c.x as i32;
-                    let y_off = u_y as i32 - c.y as i32;
+                    let x_off = c.x as i32 - u_x as i32;
+                    let y_off = c.y as i32 - u_y as i32 ;
+
+                    let i = x_off+(y_off*3)+4;
 
                     if x_off == 0 && y_off == 0 {continue;}
+
+                    let x_c_off = c.x as i32 - min_x as i32;
+                    let y_c_off = c.y as i32 - min_y as i32;
+
+                    //if x_c_off.abs() > 1 {continue;}
+                    //if y_c_off.abs() > 1 {continue;}
 
                     //println!("x:{:02} y:{:02}",x_off,y_off);
 
                     let _n_s = (y_2 - y_1) * (x_2 - x_1);
                     //println!("{}",n_s);
                     //println!("{} {}",c.y,c.x);
-                    if c.propograte(x_off, y_off, states.clone()) {
+                    if c.propograte(x_off, y_off, u_c.possible_states(i as usize).clone()) {
                         if !updates.contains(&(c.y as usize, c.x as usize)) {
+                            //println!("pushed {} {}",c.x,c.y);
                             updates.push((c.y as usize, c.x as usize));
                         }
                         //println!("wow {} {}",c.y,c.x);
@@ -205,89 +186,183 @@ fn main() {
 #[derive(Clone,Debug)]
 struct State{
     index : usize,
-    neighbours: Vec<Vec<[Rgba<u8>;9]>>,
+    neighbours: [Vec<usize>;9],
     state: [Rgba<u8>;9]
+}
+
+impl State{
+    fn neighbour_check(&mut self, other :State, i : usize){
+        let x_self_off = 2 - (i%3);
+        let y_self_off = 2 - (i/3);
+
+        let x_other_off = i%3;
+        let y_other_off = i/3;
+
+        let mut self_slice = Vec::new();
+        let mut other_slice = Vec::new();
+
+        for (p_i,&pix) in self.state.iter().enumerate() {
+            let p_x = p_i%3;
+            let p_y = p_i/3;
+
+            if p_x != x_self_off && p_y != y_self_off {
+                self_slice.push(pix.clone());
+            }
+        }
+
+        for (p_i,&pix) in other.state.iter().enumerate() {
+            let p_x = p_i%3;
+            let p_y = p_i/3;
+
+            if p_x != x_other_off && p_y != y_other_off {
+                other_slice.push(pix.clone());
+            }
+        }
+
+        //println!("self: {:?}",self_slice.len());
+        //println!("other: {:?}",other_slice.len());
+        //println!("off : {} {} , {} {}",x_self_off,y_self_off,x_other_off,y_other_off);
+
+        if other_slice == self_slice
+        {
+            let b_i = (other.index + 64 - 1)/64;
+            let b_o = other.index%64;
+
+            while self.neighbours[i].len() <= b_i {self.neighbours[i].push(0)}
+
+            //println!("bitting {} {} {}",i,b_i,b_o);
+
+            self.neighbours[i][b_i] |= 1<<b_o;
+        }
+    }
 }
 
 #[derive(Clone,Debug)]
 struct Cell{
-    super_states: Vec<State>,
+    lib: Vec<State>,
+    super_states: Vec<usize>,
     x: u32,
     y: u32,
     collapsed: bool,
+    size: usize,
 }
 
 impl Cell{
-    fn new(lib : Vec<State>,x : u32,y: u32) -> Cell{
-        Cell{super_states: lib,x,y,collapsed:false}
+    fn new(lib : Vec<State>,x : u32,y: u32,size: usize) -> Cell{
+        Cell{lib,x,y,collapsed:false,size,super_states:vec![usize::MAX;(size + 64 - 1)/64]}
     }
 
     fn collapse_coef(&self) -> usize{
-        let s : HashSet<Rgba<u8>> = self.super_states.iter().map(|&(_,s)|s[4].clone()).collect();
-
-
+        let s = self.super_states.iter().map(|u|u.count_ones()).reduce(|a,b|a+b);
 
         if self.collapsed {
             return usize::MAX;
         }
 
-        s.len()
+        s.unwrap() as usize
     }
 
-    fn determin(&mut self, state: Rgba<u8>){
-
-        println!("{:?}",self.super_states);
-
-        self.super_states = self.super_states.iter().filter(|&(_,s)|s[4] == state).map(|&s|s).collect();
-
-        if self.super_states.len() == 0 {panic!("Determin made 0 states")}
-
-        self.collapsed = true;
-
-    }
-
-    fn state(&self) -> Rgba<u8>{
-        self.super_states[0].1[4]
-    }
-
-    fn collapse(&mut self) -> [Rgba<u8>;9]{
+    fn collapse(&mut self){
         //println!("c_l:{}",self.super_states.len());
-        if self.super_states.len() == 1 {return self.super_states[0].1;}
+        if self.super_states.len() == 1 {
+            self.collapsed = true;
+            return;
+        }
+
+        if self.super_states.len() == 0 {panic!("trying to collapse 0 at {} {}",self.x,self.y)}
 
         let mut r = rand::thread_rng();
         for _ in 0..(self.super_states.len()-1) {
             let i = r.gen_range(0..self.super_states.len());
             self.super_states.remove(i);
         }
-
+        //println!("collapse at {} {} ,{}",self.x,self.y,self.super_states[0].index);
         self.collapsed = true;
-
-        self.super_states[0].1
         //println!("c_l_n:{}",self.super_states.len());
+
     }
 
-    fn possible_states(&self) -> Vec<[Rgba<u8>;9]>{
-        self.super_states.iter().map(|&(_,s)|s.clone()).collect()
+    fn state(&self)->Rgba<u8>{
+        self.super_states[0].state[4]
     }
 
-    fn propograte(&mut self,x_off:i32,y_off:i32,super_states: Vec<[Rgba<u8>;9]>) -> bool{
+    fn possible_states(&self, i : usize) -> Vec<usize>{
+
+        let lib_filter = Vec::new();
+
+        for u in self.super_states {
+            for b in u.get_bits() {
+
+            }
+        }
+        
+        self.lib.iter().map(|s|s.neighbours[i].clone()).flatten().collect()
+    }
+
+    fn propograte(&mut self,x_off:i32,y_off:i32,super_states: Vec<usize>) -> bool{
 
         if self.super_states.len() == 0 {panic!("No States??");}
 
-        let states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[4].clone()).collect();
+        //let states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[4].clone()).collect();
 
         if self.collapsed {return false;}
         let i = x_off + (y_off * 3) + 4;
 
+        let old_len = self.super_states.clone();
+
+        self.super_states = self.super_states.iter().filter(|s_s|super_states.contains(&s_s.index)).map(|s|s.clone()).collect();
+
+        let new_len = self.super_states.len();
+        if new_len == 0{
+            println!("x:{} y:{}",self.x,self.y);
+            for j in 0..196 as usize {
+                if j % 14 == 0
+                {
+                    println!("");
+                    print!("# ");
+                }
+
+                let states : Vec<usize> = old_len.iter().map(|s|s.index).collect();
+
+                if super_states.contains(&j) {print!("o")}
+                else if states.contains(&j) {print!("x")}
+                else { print!(".") }
+            }
+            println!("");
+            panic!("What? {:?}",super_states);
+        }
+
+        if new_len == old_len.len() {return false;}
+
+        /*
+
+
+        println!("x:{} y:{}",self.x,self.y);
+        for j in 0..196 as usize {
+            if j % 14 == 0
+            {
+                println!("");
+                print!("# ");
+            }
+
+            let states : Vec<usize> = old_len.iter().map(|s|s.index).collect();
+
+            if super_states.contains(&j) {print!("o")}
+            else if states.contains(&j) {print!("x")}
+            else { print!(".") }
+        }
+        println!("");
+
+         */
+
         //let self_states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[i as usize].clone()).collect();
 
         //println!("i:{} x:{} y:{}",i,x_off,y_off);
-
+        /*
         let old_states = self.super_states.clone();
         let squares : Vec<(usize,(usize,Rgba<u8>))> = self.super_states.iter().enumerate().map(|(j,&(k,s))| (j,(k,s[i as usize]))).collect();
         let squares_filter : Vec<&usize> = squares.iter().filter(|&&(_,(_,s))| states.contains(&s)).map(|(i,_)| i).collect();
 
-        /*
         let self_square : Vec<(usize,(usize,Rgba<u8>))> = self.super_states.iter().enumerate().map(|(j,&(k,s))| (j,(k,s[4]))).collect();
         let mut self_filter : Vec<&usize> = squares.iter().filter(|&&(_,(_,s))| self_states.contains(&s)).map(|(i,_)| i).collect();
 
@@ -295,7 +370,7 @@ impl Cell{
 
         let squares_filter : HashSet<&usize> = self_filter.iter().map(|&u|u).clone().collect();
 
-         */
+
         if squares_filter.len() == old_states.len() {return false;}
         //println!("x:{} y{}",self.x,self.y);
         //println!("old: l:{} {:?}",old_states.len(),old_states.iter().map(|(i,_)|i).collect::<Vec<&usize>>());
@@ -309,7 +384,7 @@ impl Cell{
         let removed : Vec<(&usize,&usize)> = indexes.iter().filter(|(i,_)|!squares_filter.contains(&i)).map(|(i,(r,_))|(i,r)).collect();
         //let keep : Vec<(&usize,&usize)> = indexes.iter().filter(|(i,_)|squares_filter.contains(&i)).map(|(i,(r,_))|(i,r)).collect();
 
-/*
+
         for j in 0..196 {
             if j % 14 == 0
             {
@@ -324,7 +399,7 @@ impl Cell{
         }
         println!("");
 
-        */
+
         //println!("keep:{:?}",squares_filter);
         if squares_filter.len() == 0 {
             panic!("Will remove all states!\n
@@ -345,7 +420,7 @@ impl Cell{
 
         //println!("n:{}",self.super_states.len());
         //println!("c:{}",changed);
-
+*/
         true
 
     }
