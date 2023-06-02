@@ -62,7 +62,7 @@ fn main() {
 
     for x in 0..width as u32 {
         for y in 0..height as u32 {
-            out[y as usize].push(Cell::new(library.clone(),x,y,size));
+            out[y as usize].push(Cell::new(library.clone(),x,y,library.len()));
         }
     }
 
@@ -249,7 +249,14 @@ struct Cell{
 
 impl Cell{
     fn new(lib : Vec<State>,x : u32,y: u32,size: usize) -> Cell{
-        Cell{lib,x,y,collapsed:false,size,super_states:vec![usize::MAX;(size + 64 - 1)/64]}
+
+        let len = (size + 64 - 1)/64;
+
+        let mut c = Cell{lib,x,y,collapsed:false,size,super_states:vec![usize::MAX;len]};
+
+        c.super_states[len-1] = (2 << (size%64))-1;
+
+        c
     }
 
     fn collapse_coef(&self) -> usize{
@@ -283,20 +290,40 @@ impl Cell{
     }
 
     fn state(&self)->Rgba<u8>{
-        self.super_states[0].state[4]
+        let index = self.super_states[0];
+        self.lib[index].state[4]
     }
 
     fn possible_states(&self, i : usize) -> Vec<usize>{
 
-        let lib_filter = Vec::new();
+        let mut lib_filter = Vec::new();
+        println!("lib {}",self.lib.len());
+        println!("s_s {:?}",self.super_states);
+        for (j,u) in self.super_states.iter().enumerate() {
+            println!("bit {} {}",j,u);
 
-        for u in self.super_states {
-            for b in u.get_bits() {
+            for b in 0..64 {
+                let bit = u & (1<<b);
+                if(bit > 0){
+                    let l_i = (64*j)+b;
+                    println!("{}",l_i);
 
+                    lib_filter.push(self.lib[l_i].clone());
+                }
             }
         }
         
-        self.lib.iter().map(|s|s.neighbours[i].clone()).flatten().collect()
+        let poss_states = lib_filter.iter().fold(vec![0,lib_filter.len()],|s_1,s_2|{
+            let mut out = Vec::new();
+            for k in 0..s_1.len() {
+                out.push( s_1[k] | s_2.neighbours[i][k]);
+            }
+
+            out
+
+        });
+
+        poss_states
     }
 
     fn propograte(&mut self,x_off:i32,y_off:i32,super_states: Vec<usize>) -> bool{
@@ -310,8 +337,13 @@ impl Cell{
 
         let old_len = self.super_states.clone();
 
-        self.super_states = self.super_states.iter().filter(|s_s|super_states.contains(&s_s.index)).map(|s|s.clone()).collect();
+        //self.super_states = self.super_states.iter().filter(|s_s|super_states.contains(&s_s.index)).map(|s|s.clone()).collect();
 
+        for j in 0..super_states.len() {
+            self.super_states[j] &= super_states[j];
+        }
+
+        /*
         let new_len = self.super_states.len();
         if new_len == 0{
             println!("x:{} y:{}",self.x,self.y);
@@ -334,7 +366,7 @@ impl Cell{
 
         if new_len == old_len.len() {return false;}
 
-        /*
+
 
 
         println!("x:{} y:{}",self.x,self.y);
