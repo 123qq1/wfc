@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::hash::Hash;
 use std::iter::zip;
 use image::{DynamicImage, GenericImageView, Rgba, GenericImage};
 use image::io::Reader as ImageReader;
@@ -13,6 +14,16 @@ fn main() {
 
     let mut l_i = 0 as usize;
 
+    let state_size = ((img.height()-2) * (img.width()-2)) as usize;
+    let req_bytes = ((state_size + 64 -1) / 64);
+
+    let mut n_base =
+        [
+            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes],
+            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes],
+            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes]
+        ];
+
     for pixel in img.pixels(){
         if pixel.0 == 0 || pixel.1 == 0 {continue;}
         if pixel.0 == 15 || pixel.1 == 15 {continue;}
@@ -26,9 +37,11 @@ fn main() {
             img.get_pixel(x-1,y+1),img.get_pixel(x,y+1),img.get_pixel(x+1,y+1)
         ];
 
-        library.push(State{state,neighbours:Default::default(),index:l_i});
+        library.push(State{state,neighbours:n_base.clone(),index:l_i,size:state_size});
         l_i += 1;
     }
+
+
 
     let lib_c = library.clone();
 
@@ -40,6 +53,10 @@ fn main() {
                 state.neighbour_check(neighbour.clone(),i);
             }
         }
+    }
+
+    for s in &library {
+        s.print_valid_neighbours();
     }
 
     /*
@@ -54,8 +71,8 @@ fn main() {
     }
 
      */
-    let height = 50;
-    let width = 50;
+    let height = 40;
+    let width = 40;
     let size = (height * width) as usize;
 
     let mut out = vec![Vec::with_capacity(width);height];
@@ -155,7 +172,7 @@ fn main() {
                     let _n_s = (y_2 - y_1) * (x_2 - x_1);
                     //println!("{}",n_s);
                     //println!("{} {}",c.y,c.x);
-                    if c.propograte(x_off, y_off, u_c.possible_states(i as usize).clone()) {
+                    if c.propograte( u_c.possible_states(i as usize).clone()) {
                         if !updates.contains(&(c.y as usize, c.x as usize)) {
                             //println!("pushed {} {}",c.x,c.y);
                             updates.push((c.y as usize, c.x as usize));
@@ -187,10 +204,30 @@ fn main() {
 struct State{
     index : usize,
     neighbours: [Vec<usize>;9],
-    state: [Rgba<u8>;9]
+    state: [Rgba<u8>;9],
+    size: usize
 }
 
 impl State{
+
+    fn print_valid_neighbours(&self){
+        println!("index {}",self.index);
+        println!("{}",self.neighbours.len());
+        for v in &self.neighbours {
+            let mut counter = 0;
+            for byte in v {
+                for shift in 0..64 {
+                    if counter >= self.size {continue}
+                    let bit = (byte >> shift) & 1;
+                    print!("{}",bit);
+                    if (counter % 14) == 13 {println!("")}
+                    counter +=1;
+                }
+            }
+            println!("");
+        }
+    }
+
     fn neighbour_check(&mut self, other :State, i : usize){
         let x_self_off = 2 - (i%3);
         let y_self_off = 2 - (i/3);
@@ -225,10 +262,10 @@ impl State{
 
         if other_slice == self_slice
         {
-            let b_i = (other.index + 64 - 1)/64;
+            let b_i = other.index/64;
             let b_o = other.index%64;
 
-            while self.neighbours[i].len() <= b_i {self.neighbours[i].push(0)}
+            //while self.neighbours[i].len() <= b_i {self.neighbours[i].push(0)}
 
             //println!("bitting {} {} {}",i,b_i,b_o);
 
@@ -254,7 +291,7 @@ impl Cell{
 
         let mut c = Cell{lib,x,y,collapsed:false,size,super_states:vec![usize::MAX;len]};
 
-        c.super_states[len-1] = (2 << (size%64))-1;
+        c.super_states[len-1] = (1 << (size%64))-1;
 
         c
     }
@@ -271,18 +308,42 @@ impl Cell{
 
     fn collapse(&mut self){
         //println!("c_l:{}",self.super_states.len());
-        if self.super_states.len() == 1 {
+
+        let mut indexes = Vec::new();
+
+        for index in 0..self.super_states.len() {
+            for shift in 0..64 {
+                let bit = 1 & (self.super_states[index]>>shift);
+                if bit > 0 { indexes.push((index*64)+bit) }
+            }
+        }
+
+        if indexes.len() == 1 {
             self.collapsed = true;
             return;
         }
 
-        if self.super_states.len() == 0 {panic!("trying to collapse 0 at {} {}",self.x,self.y)}
+        if indexes.len() == 0 {panic!("trying to collapse 0 at {} {}",self.x,self.y)}
+
+        //println!("pre collapse len {}",indexes.len());
 
         let mut r = rand::thread_rng();
-        for _ in 0..(self.super_states.len()-1) {
-            let i = r.gen_range(0..self.super_states.len());
-            self.super_states.remove(i);
+        for _ in 0..(indexes.len()-1) {
+            let i = r.gen_range(0..indexes.len());
+
+            let shift = i%64;
+            let b_i = i/64;
+
+            let pre = self.super_states[b_i];
+
+            self.super_states[b_i] = pre & !(1<<shift);
+
+            indexes.remove(i);
         }
+
+        //println!("post collapse {}",indexes.len());
+
+        //println!("collapse to {}",indexes[0]);
         //println!("collapse at {} {} ,{}",self.x,self.y,self.super_states[0].index);
         self.collapsed = true;
         //println!("c_l_n:{}",self.super_states.len());
@@ -290,50 +351,72 @@ impl Cell{
     }
 
     fn state(&self)->Rgba<u8>{
-        let index = self.super_states[0];
-        self.lib[index].state[4]
+        for index in 0..self.super_states.len() {
+            let byte = self.super_states[index];
+            if byte == 0 {continue}
+            for shift in 0..64 {
+                let bit = 1 & (byte >> shift);
+                if bit > 0 {
+                    let index = (index * 64) + shift;
+                    println!("out {}",index);
+                    return self.lib[index].state[4];
+                }
+            }
+        }
+        return self.lib[0].state[4];
     }
 
-    fn possible_states(&self, i : usize) -> Vec<usize>{
+    fn possible_states(&self, off : usize) -> Vec<usize>{
+
+        let off = off;
 
         let mut lib_filter = Vec::new();
-        println!("lib {}",self.lib.len());
-        println!("s_s {:?}",self.super_states);
-        for (j,u) in self.super_states.iter().enumerate() {
-            println!("bit {} {}",j,u);
+        //println!("lib {}",self.lib.len());
+        //println!("s_s {:?}",self.super_states);
+        for (s_i,u) in self.super_states.iter().enumerate() {
+            //println!("bit {} {}",j,u);
 
             for b in 0..64 {
                 let bit = u & (1<<b);
-                if(bit > 0){
-                    let l_i = (64*j)+b;
-                    println!("{}",l_i);
+                if bit > 0 {
+                    let l_i = (64*s_i)+b;
+                    //println!("{}",l_i);
 
                     lib_filter.push(self.lib[l_i].clone());
                 }
             }
         }
+
+        //println!("lib {}",lib_filter.len());
+
+        //println!("states {}",self.super_states.len());
         
-        let poss_states = lib_filter.iter().fold(vec![0,lib_filter.len()],|s_1,s_2|{
+        let poss_states = lib_filter.iter().fold(vec![0;self.super_states.len()],|s_1,s_2|{
             let mut out = Vec::new();
+            //println!("s_1 {}",s_1.len());
             for k in 0..s_1.len() {
-                out.push( s_1[k] | s_2.neighbours[i][k]);
+                //println!("n_l {}",s_2.neighbours[off].len());
+                let union = s_1[k] | s_2.neighbours[off][k];
+
+                out.push( union);
             }
 
             out
 
         });
 
+        //println!("poss {}",poss_states.len());
+
         poss_states
     }
 
-    fn propograte(&mut self,x_off:i32,y_off:i32,super_states: Vec<usize>) -> bool{
+    fn propograte(&mut self, super_states: Vec<usize>) -> bool{
 
         if self.super_states.len() == 0 {panic!("No States??");}
 
         //let states : Vec<Rgba<u8>> = super_states.iter().map(|&s|s[4].clone()).collect();
 
         if self.collapsed {return false;}
-        let i = x_off + (y_off * 3) + 4;
 
         let old_len = self.super_states.clone();
 
@@ -342,6 +425,10 @@ impl Cell{
         for j in 0..super_states.len() {
             self.super_states[j] &= super_states[j];
         }
+
+        let new_len = self.super_states.clone();
+
+        if new_len == old_len {return false}
 
         /*
         let new_len = self.super_states.len();
