@@ -8,38 +8,9 @@ use rand::Rng;
 fn main() {
     println!("Hello, wave function collapse!");
 
-    let img = ImageReader::open("img/Knot.png").unwrap().decode().unwrap();
+    let img = ImageReader::open("img/CityNoWalls.png").unwrap().decode().unwrap();
 
-    let mut library = Vec::new();
-
-    let mut l_i = 0 as usize;
-
-    let state_size = ((img.height()-2) * (img.width()-2)) as usize;
-    let req_bytes = ((state_size + 64 - 1) / 64);
-
-    let mut n_base =
-        [
-            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes],
-            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes],
-            vec![0;req_bytes], vec![0;req_bytes],vec![0;req_bytes]
-        ];
-
-    for pixel in img.pixels(){
-        if pixel.0 == 0 || pixel.1 == 0 {continue;}
-        if pixel.0 == (img.width()-1) || pixel.1 == (img.height()-1) {continue;}
-
-        let x = pixel.0;
-        let y = pixel.1;
-
-        let state = [
-            img.get_pixel(x-1,y-1),img.get_pixel(x,y-1),img.get_pixel(x+1,y-1),
-            img.get_pixel(x-1,y),img.get_pixel(x,y),img.get_pixel(x+1,y),
-            img.get_pixel(x-1,y+1),img.get_pixel(x,y+1),img.get_pixel(x+1,y+1)
-        ];
-
-        library.push(State{state,neighbours:n_base.clone(),index:l_i,size:state_size});
-        l_i += 1;
-    }
+    let mut library = create_lib(img);
 
     println!("Sampling done {}",library.len());
 
@@ -50,10 +21,12 @@ fn main() {
         for neighbour in &lib_c {
             for i in 0..9 {
                 if i == 4 {continue;}
-                state.neighbour_check(neighbour.clone(),i);
+                state.neighbour_check(neighbour,i);
             }
         }
     }
+
+    let library = library;
 
     println!("neighbour done");
 
@@ -69,15 +42,15 @@ fn main() {
     }
 
      */
-    let height = 40;
-    let width = 40;
+    let height = 50;
+    let width = 100;
     let size = (height * width) as usize;
 
     let mut out = vec![Vec::with_capacity(width);height];
 
     for x in 0..width as u32 {
         for y in 0..height as u32 {
-            out[y as usize].push(Cell::new(library.clone(),x,y,library.len()));
+            out[y as usize].push(Cell::new(&library,x,y,library.len()));
         }
     }
 
@@ -91,6 +64,8 @@ fn main() {
             c.collapse_coef()
         }).collect();
     let mut max_entropy = *entropys.iter().filter(|&&e| e < usize::MAX).max().unwrap();
+
+    let mut first = true;
 
     while max_entropy > 1{
         //println!("o_h:{} o_w:{}",out.len(),out[0].len());
@@ -121,10 +96,17 @@ fn main() {
         */
         //println!("");
         //println!("e_l:{} e:{:?}",entropys.len(),entropys);
-        let (min_index,_min_value) = entropys.iter().enumerate().min_by_key(|(_,&t)|t).unwrap();
+        let (mut min_index,_) = entropys.iter().enumerate().min_by_key(|(_,&t)|t).unwrap();
+
+        if first {
+            first = false;
+            min_index = (width/2) + ((height/2)*64)
+        }
 
         let min_x = min_index%width;
         let min_y = min_index/width;
+
+        //println!("collapsing {} {}",min_x,min_y);
 
         out[min_y][min_x].collapse();
         updates.push((min_y,min_x));
@@ -134,7 +116,7 @@ fn main() {
 
             let (u_y, u_x) = updates.pop().unwrap();
 
-            //println!("working on: {} {} of {}",u_x,u_y,pre_len);
+            //println!("working on: {} {}",u_x,u_y);
 
             let u_c = out[u_y][u_x].clone();
 
@@ -196,6 +178,44 @@ fn main() {
     d_image.save(p).unwrap();
 }
 
+fn create_lib(img: DynamicImage) -> Vec<State> {
+    let state_size = ((img.height() - 2) * (img.width() - 2)) as usize;
+
+    let mut library = Vec::with_capacity(state_size);
+
+    for pixel in img.pixels() {
+        if pixel.0 == 0 || pixel.1 == 0 { continue; }
+        if pixel.0 == (img.width() - 1) || pixel.1 == (img.height() - 1) { continue; }
+
+        let x = pixel.0;
+        let y = pixel.1;
+
+        let state = [
+            img.get_pixel(x - 1, y - 1), img.get_pixel(x, y - 1), img.get_pixel(x + 1, y - 1),
+            img.get_pixel(x - 1, y), img.get_pixel(x, y), img.get_pixel(x + 1, y),
+            img.get_pixel(x - 1, y + 1), img.get_pixel(x, y + 1), img.get_pixel(x + 1, y + 1)
+        ];
+        if !library.contains(&state) {
+            library.push(state);
+        }
+    }
+
+    let state_size = library.len();
+    let req_bytes = ((state_size + 64 - 1) / 64);
+
+    let mut n_base =
+        [
+            vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes],
+            vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes],
+            vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes]
+        ];
+
+    let mut library: Vec<State> = library.iter().enumerate().map(|(i, s)|
+        State { neighbours: n_base.clone(), state: s.clone(), index: i, size: state_size }
+    ).collect();
+    library
+}
+
 #[derive(Clone,Debug)]
 struct State{
     index : usize,
@@ -206,15 +226,13 @@ struct State{
 
 impl PartialEq for State{
     fn eq(&self, other: &Self) -> bool {
-
         self.state == other.state
-
     }
 }
 
 impl State{
 
-    fn neighbour_check(&mut self, other :State, i : usize){
+    fn neighbour_check(&mut self, other :&State, i : usize){
         let x_self_off = 2 - (i%3);
         let y_self_off = 2 - (i/3);
 
@@ -261,8 +279,8 @@ impl State{
 }
 
 #[derive(Clone,Debug)]
-struct Cell{
-    lib: Vec<State>,
+struct Cell<'a>{
+    lib: &'a Vec<State>,
     super_states: Vec<usize>,
     x: u32,
     y: u32,
@@ -270,8 +288,8 @@ struct Cell{
     size: usize,
 }
 
-impl Cell{
-    fn new(lib : Vec<State>,x : u32,y: u32,size: usize) -> Cell{
+impl Cell<'_>{
+    fn new(lib : &Vec<State>,x : u32,y: u32,size: usize) -> Cell{
 
         let len = (size + 64 - 1)/64;
 
@@ -309,6 +327,10 @@ impl Cell{
         //println!("collapse from {:?}",self.super_states);
         //println!("index from {:?}",indexes);
 
+        if indexes.len() == 0 {
+            self.collapsed = true;
+            return;
+        }
         if indexes.len() == 0 {panic!("trying to collapse 0 at {} {}",self.x,self.y)}
 
         //println!("pre collapse len {}",indexes.len());
@@ -370,7 +392,7 @@ impl Cell{
                     let l_i = (64*s_i)+b;
                     //println!("{}",l_i);
 
-                    lib_filter.push(&self.lib[l_i]);
+                    lib_filter.push(&self.lib[l_i].neighbours[off]);
                 }
             }
         }
@@ -379,19 +401,13 @@ impl Cell{
 
         //println!("states {}",self.super_states.len());
         
-        let poss_states = lib_filter.iter().fold(vec![0;self.super_states.len()],|s_1,s_2|{
-            let mut out = Vec::new();
-            //println!("s_1 {}",s_1.len());
-            for k in 0..s_1.len() {
-                //println!("n_l {}",s_2.neighbours[off].len());
-                let union = s_1[k] | s_2.neighbours[off][k];
+        let mut poss_states = vec![0;self.super_states.len()];
 
-                out.push( union);
+        for s in lib_filter {
+            for (i,n) in s.iter().enumerate() {
+                poss_states[i] |= n;
             }
-
-            out
-
-        });
+        }
 
         //println!("poss {}",poss_states.len());
 
