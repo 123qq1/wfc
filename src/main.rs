@@ -1,14 +1,13 @@
 use std::cmp::min;
-use std::hash::Hash;
-use std::iter::zip;
 use image::{DynamicImage, GenericImageView, Rgba, GenericImage};
 use image::io::Reader as ImageReader;
-use rand::Rng;
+use rand::distributions::WeightedIndex;
+use rand::prelude::*;
 
 fn main() {
     println!("Hello, wave function collapse!");
 
-    let img = ImageReader::open("img/CityNoWalls.png").unwrap().decode().unwrap();
+    let img = ImageReader::open("img/3Bricks.png").unwrap().decode().unwrap();
 
     let mut library = create_lib(img);
 
@@ -24,6 +23,10 @@ fn main() {
                 state.neighbour_check(neighbour,i);
             }
         }
+    }
+
+    for state in &mut library {
+        state.find_stability();
     }
 
     let library = library;
@@ -43,7 +46,7 @@ fn main() {
 
      */
     let height = 50;
-    let width = 100;
+    let width = 50;
     let size = (height * width) as usize;
 
     let mut out = vec![Vec::with_capacity(width);height];
@@ -139,8 +142,8 @@ fn main() {
 
                     if x_off == 0 && y_off == 0 {continue;}
 
-                    let x_c_off = c.x as i32 - min_x as i32;
-                    let y_c_off = c.y as i32 - min_y as i32;
+                    //let x_c_off = c.x as i32 - min_x as i32;
+                    //let y_c_off = c.y as i32 - min_y as i32;
 
                     //if x_c_off.abs() > 1 {continue;}
                     //if y_c_off.abs() > 1 {continue;}
@@ -150,7 +153,7 @@ fn main() {
                     let _n_s = (y_2 - y_1) * (x_2 - x_1);
                     //println!("{}",n_s);
                     //println!("{} {}",c.y,c.x);
-                    if c.propograte( u_c.possible_states(i as usize).clone()) {
+                    if c.propograte( u_c.possible_states(i as usize)) {
                         if !updates.contains(&(c.y as usize, c.x as usize)) {
                             //println!("pushed {} {}",c.x,c.y);
                             updates.push((c.y as usize, c.x as usize));
@@ -163,7 +166,7 @@ fn main() {
         }
         max_entropy = *entropys.iter().filter(|&&e| e < usize::MAX).max().unwrap_or(&0);
     }
-    println!("done?");
+    println!("done");
 
     let mut d_image = DynamicImage::new_rgba8(width as u32,height as u32);
 
@@ -201,17 +204,17 @@ fn create_lib(img: DynamicImage) -> Vec<State> {
     }
 
     let state_size = library.len();
-    let req_bytes = ((state_size + 64 - 1) / 64);
+    let req_bytes = (state_size + 64 - 1) / 64;
 
-    let mut n_base =
+    let n_base =
         [
             vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes],
             vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes],
             vec![0; req_bytes], vec![0; req_bytes], vec![0; req_bytes]
         ];
 
-    let mut library: Vec<State> = library.iter().enumerate().map(|(i, s)|
-        State { neighbours: n_base.clone(), state: s.clone(), index: i, size: state_size }
+    let library: Vec<State> = library.iter().enumerate().map(|(i, s)|
+        State { neighbours: n_base.clone(), state: s.clone(), index: i, /*size: state_size*/stability:0 }
     ).collect();
     library
 }
@@ -221,7 +224,8 @@ struct State{
     index : usize,
     neighbours: [Vec<usize>;9],
     state: [Rgba<u8>;9],
-    size: usize
+    stability: usize,
+    //size: usize
 }
 
 impl PartialEq for State{
@@ -231,6 +235,17 @@ impl PartialEq for State{
 }
 
 impl State{
+
+    fn find_stability(&mut self){
+        let not_self = self.neighbours.iter().enumerate().filter(|(i,_)|*i != 4).map(|(_,n)|n);
+
+        self.stability = not_self.fold(usize::MAX,|n_1,n_2|{
+            let ones = n_2.iter().fold(0,|b_1,b_2|{b_1 + b_2.count_ones()}) as usize;
+            min(n_1,ones)
+            //n_1+ones
+        });
+        //println!("s {}",self.stability);
+    }
 
     fn neighbour_check(&mut self, other :&State, i : usize){
         let x_self_off = 2 - (i%3);
@@ -282,10 +297,11 @@ impl State{
 struct Cell<'a>{
     lib: &'a Vec<State>,
     super_states: Vec<usize>,
+    poss_states: [Vec<usize>;9],
     x: u32,
     y: u32,
     collapsed: bool,
-    size: usize,
+    //size: usize,
 }
 
 impl Cell<'_>{
@@ -293,7 +309,14 @@ impl Cell<'_>{
 
         let len = (size + 64 - 1)/64;
 
-        let mut c = Cell{lib,x,y,collapsed:false,size,super_states:vec![usize::MAX;len]};
+        let poss_states =
+            [
+                vec![0;len],vec![0;len],vec![0;len],
+                vec![0;len],vec![0;len],vec![0;len],
+                vec![0;len],vec![0;len],vec![0;len],
+            ];
+
+        let mut c = Cell{lib,x,y,collapsed:false,/*size,*/super_states:vec![usize::MAX;len],poss_states};
 
         c.super_states[len-1] = (1 << (size%64))-1;
 
@@ -312,42 +335,40 @@ impl Cell<'_>{
         //println!("c_l:{}",self.super_states.len());
 
         let mut indexes = Vec::new();
+        let mut weights = Vec::new();
 
         for index in 0..self.super_states.len() {
             for shift in 0..64 {
                 let bit = 1 & (self.super_states[index]>>shift);
-                if bit > 0 { indexes.push((index*64)+shift) }
+                if bit > 0 {
+                    let s_index = (index*64)+shift;
+                    indexes.push(s_index);
+                    weights.push(self.lib[s_index].stability)
+                }
             }
         }
 
-        if indexes.len() == 1 {
+        if indexes.len() <= 1 {
+            //self.update_poss_states();
             self.collapsed = true;
             return;
         }
-        //println!("collapse from {:?}",self.super_states);
-        //println!("index from {:?}",indexes);
 
-        if indexes.len() == 0 {
-            self.collapsed = true;
-            return;
-        }
-        if indexes.len() == 0 {panic!("trying to collapse 0 at {} {}",self.x,self.y)}
 
         //println!("pre collapse len {}",indexes.len());
-
+        let dist = WeightedIndex::new(&weights).unwrap();
         let mut r = rand::thread_rng();
-        for _ in 0..(indexes.len()-1) {
-            let i = r.gen_range(0..indexes.len());
 
-            indexes.remove(i);
-        }
+        let chosen = dist.sample(&mut r);
+
+        //println!("collapse stability {}",weights[chosen]);
 
         //println!("collapsed to {}",indexes[0]);
 
         let mut new_states = vec![0;self.super_states.len()];
 
-        let byte_i = indexes[0]/64;
-        let bit_i = indexes[0]%64;
+        let byte_i = indexes[chosen]/64;
+        let bit_i = indexes[chosen]%64;
 
         new_states[byte_i] = 1 << bit_i;
 
@@ -357,6 +378,7 @@ impl Cell<'_>{
 
         //println!("collapse at {} {} ,{}",self.x,self.y,self.super_states[0].index);
         self.collapsed = true;
+        self.update_poss_states();
         //println!("c_l_n:{}",self.super_states.len());
 
     }
@@ -376,10 +398,33 @@ impl Cell<'_>{
         return self.lib[0].state[4];
     }
 
-    fn possible_states(&self, off : usize) -> Vec<usize>{
+    fn update_poss_states(&mut self){
+        for n_c in 0..9 {
+            for b_i in 0..self.super_states.len() {
+                self.poss_states[n_c][b_i] = 0;
+            }
+        }
 
-        let off = off;
+        for (s_i,byte) in self.super_states.iter().enumerate() {
+            for b in 0..64 {
+                let bit = byte & (1<<b);
+                if bit > 0 {
+                    let l_i = (64*s_i)+b;
+                    for n_i in 0..9 {
+                        for (n_b_i, n_byte) in self.lib[l_i].neighbours[n_i].iter().enumerate() {
+                            self.poss_states[n_i][n_b_i] |= n_byte;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
+    fn possible_states(&self, off : usize) -> &Vec<usize>{
+
+
+        return &self.poss_states[off];
+        /*
         let mut lib_filter = Vec::new();
         //println!("lib {}",self.lib.len());
         //println!("s_s {:?}",self.super_states);
@@ -411,10 +456,12 @@ impl Cell<'_>{
 
         //println!("poss {}",poss_states.len());
 
-        poss_states
+        &poss_states
+
+         */
     }
 
-    fn propograte(&mut self, super_states: Vec<usize>) -> bool{
+    fn propograte(&mut self, super_states: &Vec<usize>) -> bool{
 
         if self.super_states.len() == 0 {panic!("No States??");}
 
@@ -430,6 +477,7 @@ impl Cell<'_>{
 
         if new_len == old_len {return false}
 
+        self.update_poss_states();
         true
 
     }
