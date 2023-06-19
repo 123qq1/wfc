@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::collections::HashMap;
 use image::{DynamicImage, GenericImageView, Rgba, GenericImage};
 use image::io::Reader as ImageReader;
 use rand::distributions::WeightedIndex;
@@ -7,9 +8,10 @@ use rand::prelude::*;
 fn main() {
     println!("Hello, wave function collapse!");
 
-    let img = ImageReader::open("img/3Bricks.png").unwrap().decode().unwrap();
+    let img = ImageReader::open("img/OfficeBuilding.png").unwrap().decode().unwrap();
 
     let mut library = create_lib(img);
+    let mut poss_state_cache : HashMap<Vec<usize>,[Vec<usize>;9]> = HashMap::new();
 
     println!("Sampling done {}",library.len());
 
@@ -112,6 +114,7 @@ fn main() {
         //println!("collapsing {} {}",min_x,min_y);
 
         out[min_y][min_x].collapse();
+        out[min_y][min_x].update_poss_states(&mut poss_state_cache);
         updates.push((min_y,min_x));
 
         while updates.len() > 0 {
@@ -154,6 +157,7 @@ fn main() {
                     //println!("{}",n_s);
                     //println!("{} {}",c.y,c.x);
                     if c.propograte( u_c.possible_states(i as usize)) {
+                        c.update_poss_states(&mut poss_state_cache);
                         if !updates.contains(&(c.y as usize, c.x as usize)) {
                             //println!("pushed {} {}",c.x,c.y);
                             updates.push((c.y as usize, c.x as usize));
@@ -378,7 +382,7 @@ impl Cell<'_>{
 
         //println!("collapse at {} {} ,{}",self.x,self.y,self.super_states[0].index);
         self.collapsed = true;
-        self.update_poss_states();
+        //self.update_poss_states();
         //println!("c_l_n:{}",self.super_states.len());
 
     }
@@ -398,7 +402,14 @@ impl Cell<'_>{
         return self.lib[0].state[4];
     }
 
-    fn update_poss_states(&mut self){
+    fn update_poss_states(&mut self, cache : &mut HashMap<Vec<usize>,[Vec<usize>;9]>){
+
+        if let Some(poss_state) = cache.get::<Vec<usize>>(&self.super_states){
+            self.poss_states = poss_state.clone();
+            return;
+        }
+
+
         for n_c in 0..9 {
             for b_i in 0..self.super_states.len() {
                 self.poss_states[n_c][b_i] = 0;
@@ -417,6 +428,10 @@ impl Cell<'_>{
                     }
                 }
             }
+        }
+
+        if !cache.contains_key::<Vec<usize>>(&self.super_states) {
+            cache.insert(self.super_states.clone(),self.poss_states.clone());
         }
     }
 
@@ -476,8 +491,6 @@ impl Cell<'_>{
         let new_len = self.super_states.clone();
 
         if new_len == old_len {return false}
-
-        self.update_poss_states();
         true
 
     }
